@@ -1,0 +1,27 @@
+# 环境变量（含敏感信息）
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+.venv/
+venv/
+
+# 数据目录（运行时生成）
+data/chroma/
+data/papers/
+data/deepresearch.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 系统文件
+.DS_Store
+Thumbs.db

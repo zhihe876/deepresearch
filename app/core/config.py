@@ -1,0 +1,46 @@
+"""
+全局配置管理
+使用 pydantic-settings 从 .env 文件和系统环境变量读取配置
+"""
+from pydantic_settings import BaseSettings
+
+
+class Settings(BaseSettings):
+    """应用全局配置，所有值均可从 .env 文件或环境变量覆盖"""
+
+    # ============ LLM 配置 ============
+    LLM_API_KEY: str = ""
+    LLM_BASE_URL: str = "https://api.deepseek.com/v1"
+    LLM_MODEL_NAME: str = "deepseek-chat"
+
+    # ============ Embedding 配置 ============
+    EMBEDDING_API_KEY: str = ""
+    EMBEDDING_BASE_URL: str = "https://api.siliconflow.cn/v1"
+    EMBEDDING_MODEL_NAME: str = "BAAI/bge-m3"
+
+    # ============ 存储路径配置 ============
+    CHROMA_PERSIST_DIR: str = "./data/chroma"
+    PAPER_STORAGE_DIR: str = "./data/papers"
+    DB_PATH: str = "./data/deepresearch.db"
+
+    # ============ 应用服务配置 ============
+    APP_HOST: str = "0.0.0.0"
+    APP_PORT: int = 8000
+    DEBUG: bool = False
+
+    # ============ 限流配置 ============
+    RATE_LIMIT_PER_MINUTE: int = 10
+
+    # ============ 超时配置 ============
+    TASK_TIMEOUT_SECONDS: int = 1800   # 任务级超时（30分钟）
+    LLM_REQUEST_TIMEOUT: int = 60      # 单次LLM调用超时（秒）
+
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",
+    }
+
+
+# 全局单例
+settings = Settings()
