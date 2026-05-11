@@ -25,45 +25,44 @@ def _cosine_similarity(v1: list[float], v2: list[float]) -> float:
 
 def _mmr_rerank(
     query_emb: list[float],
-    candidates: list[dict],
+    item_embeddings: list[list[float]],
     top_k: int,
     lambda_mult: float,
-) -> list[dict]:
+) -> list[int]:
     """
-    MMR（最大边际相关）重排算法
-    lambda_mult=1.0: 纯相似度排序
-    lambda_mult=0.0: 纯多样性排序
+    MMR 重排，返回选中项的索引列表
+    lambda_mult=1.0: 纯相似度排序，0.0: 纯多样性排序
     """
-    if len(candidates) <= top_k:
-        return candidates
+    n = len(item_embeddings)
+    if n <= top_k:
+        return list(range(n))
 
-    selected_indices: list[int] = []
-    remaining = list(range(len(candidates)))
+    # 预计算 query→每个候选的相似度
+    sim_query = [_cosine_similarity(query_emb, emb) for emb in item_embeddings]
 
-    while len(selected_indices) < top_k and remaining:
-        best_idx = -1
-        best_score = float("-inf")
+    selected: list[int] = []
+    remaining = list(range(n))
 
-        for i in remaining:
-            sim_query = _cosine_similarity(query_emb, candidates[i]["embedding"])
-            if selected_indices:
+    while len(selected) < top_k and remaining:
+        if not selected:
+            # 第一轮直接选最相似的
+            best = max(remaining, key=lambda i: sim_query[i])
+        else:
+            best = remaining[0]
+            best_mmr = float("-inf")
+            for i in remaining:
                 sim_selected = max(
-                    _cosine_similarity(candidates[i]["embedding"], candidates[j]["embedding"])
-                    for j in selected_indices
+                    _cosine_similarity(item_embeddings[i], item_embeddings[j])
+                    for j in selected
                 )
-            else:
-                sim_selected = 0.0
+                mmr = lambda_mult * sim_query[i] - (1 - lambda_mult) * sim_selected
+                if mmr > best_mmr:
+                    best_mmr = mmr
+                    best = i
+        selected.append(best)
+        remaining.remove(best)
 
-            mmr_score = lambda_mult * sim_query - (1 - lambda_mult) * sim_selected
-            if mmr_score > best_score:
-                best_score = mmr_score
-                best_idx = i
-
-        if best_idx >= 0:
-            selected_indices.append(best_idx)
-            remaining.remove(best_idx)
-
-    return [candidates[i] for i in selected_indices]
+    return selected
 
 
 async def store_chunks_to_chroma(
@@ -204,7 +203,7 @@ async def search_chunks_mmr(
         if col_count == 0:
             return []
 
-        fetch_k = min(top_k * 3, col_count, 100)
+        fetch_k = min(top_k * 5, col_count, 500)
 
         query_params: dict = {
             "query_embeddings": [query_emb],
@@ -225,30 +224,27 @@ async def search_chunks_mmr(
         dists_list = result.get("distances", [[]])[0]
         embs_list = result.get("embeddings", [[]])[0]
 
-        # 构建候选列表
-        candidates = []
+        # 构建结果列表和 embedding 矩阵（分开传递，不污染返回 dict）
+        results = []
+        item_embeddings = []
         for i in range(len(ids_list)):
             dist = dists_list[i]
             score = 1.0 / (1.0 + dist)
-            candidates.append({
+            results.append({
                 "id": ids_list[i],
                 "text": docs_list[i],
                 "metadata": metas_list[i],
                 "score": round(score, 4),
-                "embedding": list(embs_list[i]),
             })
+            item_embeddings.append(list(embs_list[i]))
 
         # MMR 重排
-        if len(candidates) <= top_k:
-            reranked = candidates
-        else:
-            reranked = _mmr_rerank(query_emb, candidates, top_k, lambda_mult)
+        if len(results) <= top_k:
+            return results
 
-        # 移除 embedding 字段（不对调用者暴露）
-        for item in reranked:
-            item.pop("embedding", None)
+        ranked_indices = _mmr_rerank(query_emb, item_embeddings, top_k, lambda_mult)
+        reranked = [results[i] for i in ranked_indices]
 
-        # 根据 where 是否存在记录降级说明
         if where and len(reranked) == 0:
             logger.warning(
                 f"MMR 检索无结果 (where={where})，可能需要降级: "

@@ -6,7 +6,7 @@
 """
 import math
 import re
-from typing import Optional
+from enum import Enum
 
 import fitz  # PyMuPDF
 
@@ -15,18 +15,36 @@ from app.core.logger import get_logger
 
 logger = get_logger(__name__)
 
+
+class Section(str, Enum):
+    ABSTRACT = "abstract"
+    INTRODUCTION = "introduction"
+    RELATED_WORK = "related_work"
+    METHOD = "method"
+    EXPERIMENT = "experiment"
+    CONCLUSION = "conclusion"
+    UNKNOWN = "unknown"
+
+
+class ParseQuality(str, Enum):
+    NORMAL = "normal"
+    LOW = "low"
+
+
+SECTION_ORDER = [s.value for s in Section if s != Section.UNKNOWN]
+
 # ============ P1-6: Section 多变体正则 ============
 SECTION_PATTERNS: dict[str, list[str]] = {
-    "abstract": [
+    Section.ABSTRACT: [
         r"^abstract\s*$",
         r"^abstract\s*[\-–—]",
     ],
-    "introduction": [
+    Section.INTRODUCTION: [
         r"^introduction$",
         r"^1\.?\s+introduction",
         r"^i\.\s+introduction",
     ],
-    "related_work": [
+    Section.RELATED_WORK: [
         r"^related\s+work",
         r"^background",
         r"^preliminaries",
@@ -34,13 +52,13 @@ SECTION_PATTERNS: dict[str, list[str]] = {
         r"^literature\s+review",
         r"^\d+\.?\s+related",
     ],
-    "method": [
+    Section.METHOD: [
         r"^(our\s+)?(proposed\s+)?(method|approach|framework|model|architecture|system)",
         r"^\d+\.?\s+(method|approach|model|our\s+approach|proposed)",
         r"^methodology",
         r"^technical\s+approach",
     ],
-    "experiment": [
+    Section.EXPERIMENT: [
         r"^experiment",
         r"^evaluation",
         r"^empirical",
@@ -48,7 +66,7 @@ SECTION_PATTERNS: dict[str, list[str]] = {
         r"^\d+\.?\s+(experiment|evaluation|result|empirical)",
         r"^performance\s+analysis",
     ],
-    "conclusion": [
+    Section.CONCLUSION: [
         r"^conclusion",
         r"^summary",
         r"^discussion",
@@ -56,16 +74,6 @@ SECTION_PATTERNS: dict[str, list[str]] = {
         r"^\d+\.?\s+(conclusion|summary|discussion)",
     ],
 }
-
-# 匹配顺序：高特异性在前，低特异性在后
-SECTION_ORDER = [
-    "abstract",
-    "introduction",
-    "related_work",
-    "method",
-    "experiment",
-    "conclusion",
-]
 
 
 def identify_section(line: str) -> str | None:
@@ -99,7 +107,7 @@ def extract_text_with_structure(pdf_path: str) -> list[dict]:
         raise PDFParseError(f"无法打开 PDF: {pdf_path}, 原因: {e}") from e
 
     sections: list[dict] = []
-    current_section = "unknown"
+    current_section = Section.UNKNOWN
     current_lines: list[str] = []
     current_page_start = 1
 
@@ -140,7 +148,7 @@ def extract_text_with_structure(pdf_path: str) -> list[dict]:
 
     # 如果只有一个 unknown 段且无有效内容，退回单段模式
     if len(sections) == 0:
-        sections = [{"section": "unknown", "text": "", "page_start": 1}]
+        sections = [{"section": Section.UNKNOWN, "text": "", "page_start": 1}]
 
     # 确保至少有一个非空 section
     found_sections = set(s["section"] for s in sections)
@@ -245,10 +253,10 @@ def process_paper(pdf_path: str) -> tuple[list[dict], str]:
     total = len(all_chunks)
     kept = len(filtered)
     if total == 0:
-        quality = "low"
+        quality = ParseQuality.LOW
     else:
         rejected_ratio = (total - kept) / total
-        quality = "low" if rejected_ratio > 0.4 else "normal"
+        quality = ParseQuality.LOW if rejected_ratio > 0.4 else ParseQuality.NORMAL
 
     logger.info(
         f"论文处理: {pdf_path} → 总 {total} chunks, 保留 {kept}, "
