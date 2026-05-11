@@ -27,7 +27,8 @@ class ChromaManager:
         return cls._instance
 
     @property
-    def client(self) -> chromadb.PersistentClient:
+    def _client_ref(self) -> chromadb.PersistentClient:
+        """内部引用，用于需要直接访问 chromadb 客户端的场景"""
         return self._client
 
     def get_or_create_collection(self, name: str) -> chromadb.Collection:

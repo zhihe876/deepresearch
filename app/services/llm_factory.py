@@ -8,7 +8,7 @@ from app.core.config import settings
 
 
 # ============ 模块级单例缓存 ============
-_llm_instances: dict[float, ChatOpenAI] = {}
+_llm_instances: dict[str, ChatOpenAI] = {}
 _embedding_instance: OpenAIEmbeddings | None = None
 
 
@@ -18,8 +18,9 @@ def get_llm(temperature: float = 0) -> ChatOpenAI:
     按 temperature 缓存单例，相同 temperature 返回同一实例
     配置：timeout=settings.LLM_REQUEST_TIMEOUT, max_retries=2
     """
-    if temperature not in _llm_instances:
-        _llm_instances[temperature] = ChatOpenAI(
+    cache_key = f"{temperature:.1f}"
+    if cache_key not in _llm_instances:
+        _llm_instances[cache_key] = ChatOpenAI(
             api_key=settings.LLM_API_KEY,
             base_url=settings.LLM_BASE_URL,
             model=settings.LLM_MODEL_NAME,
@@ -27,7 +28,7 @@ def get_llm(temperature: float = 0) -> ChatOpenAI:
             timeout=settings.LLM_REQUEST_TIMEOUT,
             max_retries=2,
         )
-    return _llm_instances[temperature]
+    return _llm_instances[cache_key]
 
 
 def get_embedding() -> OpenAIEmbeddings:

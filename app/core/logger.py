@@ -29,8 +29,7 @@ def get_logger(name: str) -> logging.Logger:
         handler.setFormatter(logging.Formatter(LOG_FORMAT, LOG_DATE_FORMAT))
         handler.addFilter(TaskIdFilter())
         logger.addHandler(handler)
-
-    logger.setLevel(logging.DEBUG if settings.DEBUG else logging.INFO)
+        logger.setLevel(logging.DEBUG if settings.DEBUG else logging.INFO)
     logger.propagate = False
 
     return logger

@@ -35,6 +35,14 @@ class Settings(BaseSettings):
     TASK_TIMEOUT_SECONDS: int = 1800   # 任务级超时（30分钟）
     LLM_REQUEST_TIMEOUT: int = 60      # 单次LLM调用超时（秒）
 
+    @property
+    def sync_database_url(self) -> str:
+        return f"sqlite:///{self.DB_PATH}"
+
+    @property
+    def async_database_url(self) -> str:
+        return f"sqlite+aiosqlite:///{self.DB_PATH}"
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

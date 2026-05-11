@@ -1,27 +1,21 @@
 """
 数据库层 — SQLAlchemy 异步引擎 + ORM 模型 + 初始化
 """
-from sqlalchemy import Column, String, Integer, Float, Text, DateTime, create_engine
-from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from datetime import datetime, timezone
 
+from sqlalchemy import Column, String, Integer, Float, Text, DateTime
+from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+
 from app.core.config import settings
+from app.models.task import TaskStatus
 
 
-# ============ 同步引擎（用于 init_db 建表） ============
-_sync_engine = create_engine(
-    f"sqlite:///{settings.DB_PATH}",
-    echo=settings.DEBUG,
-)
-
-# ============ 异步引擎（用于运行时操作） ============
 _async_engine = create_async_engine(
-    f"sqlite+aiosqlite:///{settings.DB_PATH}",
+    settings.async_database_url,
     echo=settings.DEBUG,
 )
 
-# 异步会话工厂
 async_session_factory = async_sessionmaker(
     _async_engine,
     class_=AsyncSession,
@@ -37,16 +31,12 @@ class ResearchTask(Base):
     """研究任务 ORM 模型"""
     __tablename__ = "research_tasks"
 
-    # ============ 主键 ============
     task_id: str = Column(String(36), primary_key=True)
-
-    # ============ 任务参数 ============
     topic: str = Column(Text, nullable=False)
-    status: str = Column(String(20), nullable=False, default="pending", index=True)
+    status: str = Column(String(20), nullable=False, default=TaskStatus.PENDING.value, index=True)
     max_papers: int = Column(Integer, nullable=False, default=5)
     language: str = Column(String(10), nullable=False, default="zh")
 
-    # ============ 时间戳 ============
     created_at: datetime = Column(
         DateTime,
         nullable=False,
@@ -54,12 +44,11 @@ class ResearchTask(Base):
     )
     completed_at: datetime | None = Column(DateTime, nullable=True)
 
-    # ============ 执行结果 ============
     final_report: str | None = Column(Text, nullable=True)
     papers_count: int = Column(Integer, nullable=False, default=0)
     revision_count: int = Column(Integer, nullable=False, default=0)
     overall_score: int | None = Column(Integer, nullable=True)
-    token_usage: str | None = Column(Text, nullable=True)       # JSON 字符串
+    token_usage: str | None = Column(Text, nullable=True)
     total_cost_usd: float | None = Column(Float, nullable=True)
     error_message: str | None = Column(Text, nullable=True)
 
@@ -85,8 +74,8 @@ class ResearchTask(Base):
 
 async def init_db() -> None:
     """创建所有数据库表（在 lifespan 启动时调用）"""
-    import asyncio
-    await asyncio.to_thread(Base.metadata.create_all, _sync_engine)
+    async with _async_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
 
 async def get_db() -> AsyncSession:
