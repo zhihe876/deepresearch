@@ -45,8 +45,7 @@ def _mmr_rerank(
 
     while len(selected) < top_k and remaining:
         if not selected:
-            # 第一轮直接选最相似的
-            best = max(remaining, key=lambda i: sim_query[i])
+            best = max(remaining, key=lambda idx: sim_query[idx])
         else:
             best = remaining[0]
             best_mmr = float("-inf")
@@ -141,7 +140,7 @@ async def search_chunks_similarity(
         if collection.count() == 0:
             return []
 
-        def _query() -> dict:
+        def _query():
             return collection.query(
                 query_embeddings=[query_emb],
                 n_results=min(top_k, collection.count()),
@@ -213,7 +212,7 @@ async def search_chunks_mmr(
         if where is not None:
             query_params["where"] = where
 
-        def _query() -> dict:
+        def _query():
             return collection.query(**query_params)
 
         result = await asyncio.to_thread(_query)

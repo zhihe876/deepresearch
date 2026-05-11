@@ -7,6 +7,7 @@
 import math
 import re
 from enum import Enum
+from typing import Optional
 
 import fitz  # PyMuPDF
 
@@ -34,7 +35,8 @@ class ParseQuality(str, Enum):
 SECTION_ORDER = [s.value for s in Section if s != Section.UNKNOWN]
 
 # ============ P1-6: Section 多变体正则 ============
-SECTION_PATTERNS: dict[str, list[str]] = {
+# 键为 Section 枚举成员（继承自 str）
+SECTION_PATTERNS = {
     Section.ABSTRACT: [
         r"^abstract\s*$",
         r"^abstract\s*[\-–—]",
@@ -76,7 +78,7 @@ SECTION_PATTERNS: dict[str, list[str]] = {
 }
 
 
-def identify_section(line: str) -> str | None:
+def identify_section(line: str) -> Optional[str]:
     """
     对输入的文本行尝试所有 section 的正则匹配
     参数：line — 单行文本（将被 strip 后匹配）
