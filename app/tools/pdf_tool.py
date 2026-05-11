@@ -32,21 +32,21 @@ class ParseQuality(str, Enum):
     LOW = "low"
 
 
-SECTION_ORDER = [s.value for s in Section if s != Section.UNKNOWN]
+SECTION_ORDER: list[str] = ["abstract", "introduction", "related_work", "method", "experiment", "conclusion"]
 
 # ============ P1-6: Section 多变体正则 ============
 # 键为 Section 枚举成员（继承自 str）
 SECTION_PATTERNS = {
-    Section.ABSTRACT: [
+    Section.ABSTRACT.value: [
         r"^abstract\s*$",
         r"^abstract\s*[\-–—]",
     ],
-    Section.INTRODUCTION: [
+    Section.INTRODUCTION.value: [
         r"^introduction$",
         r"^1\.?\s+introduction",
         r"^i\.\s+introduction",
     ],
-    Section.RELATED_WORK: [
+    Section.RELATED_WORK.value: [
         r"^related\s+work",
         r"^background",
         r"^preliminaries",
@@ -54,13 +54,13 @@ SECTION_PATTERNS = {
         r"^literature\s+review",
         r"^\d+\.?\s+related",
     ],
-    Section.METHOD: [
+    Section.METHOD.value: [
         r"^(our\s+)?(proposed\s+)?(method|approach|framework|model|architecture|system)",
         r"^\d+\.?\s+(method|approach|model|our\s+approach|proposed)",
         r"^methodology",
         r"^technical\s+approach",
     ],
-    Section.EXPERIMENT: [
+    Section.EXPERIMENT.value: [
         r"^experiment",
         r"^evaluation",
         r"^empirical",
@@ -68,7 +68,7 @@ SECTION_PATTERNS = {
         r"^\d+\.?\s+(experiment|evaluation|result|empirical)",
         r"^performance\s+analysis",
     ],
-    Section.CONCLUSION: [
+    Section.CONCLUSION.value: [
         r"^conclusion",
         r"^summary",
         r"^discussion",
