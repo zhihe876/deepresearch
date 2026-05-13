@@ -1,8 +1,13 @@
 """
 全局配置管理
 使用 pydantic-settings 从 .env 文件和系统环境变量读取配置
+.env 路径基于本文件位置推算（adapters/openai.py:config.py → ../../.env），不受 CWD 影响
 """
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 class Settings(BaseSettings):
@@ -18,7 +23,7 @@ class Settings(BaseSettings):
     EMBEDDING_BASE_URL: str = "https://api.siliconflow.cn/v1"
     EMBEDDING_MODEL_NAME: str = "BAAI/bge-m3"
 
-    # ============ 存储路径配置 ============
+    # ============ 存储路径配置（相对路径基于项目根目录）============
     CHROMA_PERSIST_DIR: str = "./data/chroma"
     PAPER_STORAGE_DIR: str = "./data/papers"
     DB_PATH: str = "./data/deepresearch.db"
@@ -44,7 +49,7 @@ class Settings(BaseSettings):
         return f"sqlite+aiosqlite:///{self.DB_PATH}"
 
     model_config = {
-        "env_file": ".env",
+        "env_file": str(_PROJECT_ROOT / ".env"),
         "env_file_encoding": "utf-8",
         "extra": "ignore",
     }
