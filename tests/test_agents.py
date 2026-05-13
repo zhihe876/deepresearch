@@ -1,15 +1,17 @@
 """
-query_planner_agent 单元测试（mock LLM）
+query_planner_agent / researcher_node 单元测试（mock LLM + 外部工具）
 """
 import asyncio
-import pytest
+from typing import Any
 from unittest.mock import AsyncMock, patch, MagicMock
+
+import pytest
 from pydantic import ValidationError
 
 from app.models.llm_outputs import QueryPlanOutput
 
 
-def _make_mock_llm(return_value=None, side_effect=None):
+def _make_mock_llm(return_value: Any = None, side_effect: Any = None) -> MagicMock:
     """构建 mock LLM：with_structured_output → ainvoke 返回指定值或抛异常"""
     mock_llm = MagicMock()
     mock_structured = AsyncMock()
@@ -28,15 +30,19 @@ def _make_mock_llm(return_value=None, side_effect=None):
 class TestQueryPlannerAgent:
     """测试 query_planner_node 的正常流程和降级逻辑"""
 
+    @staticmethod
+    def _state(topic: str, task_id: str = "test-123") -> dict[str, Any]:
+        return {"topic": topic, "task_id": task_id}
+
     def test_normal_flow(self):
         """正常流程：LLM 返回有效的 QueryPlanOutput"""
         from app.agents.query_planner_agent import query_planner_node
 
         mock_llm = _make_mock_llm()
-        state = {"topic": "attention mechanism", "task_id": "test-123"}
+        state: dict[str, Any] = self._state("attention mechanism")
 
         with patch("app.agents.query_planner_agent.get_llm", return_value=mock_llm):
-            result = asyncio.run(query_planner_node(state))
+            result: dict[str, Any] = asyncio.run(query_planner_node(state))
 
         assert result["query_variants"] == ["transformer attention", "self-attention mechanism"]
         assert result["domain_category"] == "cs.CL"
@@ -48,10 +54,10 @@ class TestQueryPlannerAgent:
         from app.agents.query_planner_agent import query_planner_node
 
         mock_llm = _make_mock_llm(side_effect=RuntimeError("LLM timeout"))
-        state = {"topic": "大模型微调 latest", "task_id": "test-fallback"}
+        state: dict[str, Any] = self._state("大模型微调 latest", "test-fallback")
 
         with patch("app.agents.query_planner_agent.get_llm", return_value=mock_llm):
-            result = asyncio.run(query_planner_node(state))
+            result: dict[str, Any] = asyncio.run(query_planner_node(state))
 
         assert result["query_variants"] == ["大模型微调 latest"]
         assert result["domain_category"] == "cs"
@@ -61,17 +67,17 @@ class TestQueryPlannerAgent:
         """LLM 返回不合法的 JSON 时，Pydantic ValidationError 触发降级"""
         from app.agents.query_planner_agent import query_planner_node
 
-        def raise_validation(*args, **kwargs):
+        def raise_validation(*args: Any, **kwargs: Any) -> None:
             raise ValidationError.from_exception_data(
                 "QueryPlanOutput",
                 [{"type": "value_error", "loc": ("query_variants",), "msg": "too short"}],
             )
 
         mock_llm = _make_mock_llm(side_effect=raise_validation)
-        state = {"topic": "transformer", "task_id": "test-val"}
+        state: dict[str, Any] = self._state("transformer", "test-val")
 
         with patch("app.agents.query_planner_agent.get_llm", return_value=mock_llm):
-            result = asyncio.run(query_planner_node(state))
+            result: dict[str, Any] = asyncio.run(query_planner_node(state))
 
         assert result["query_variants"] == ["transformer"]
         assert "降级原因" in result["search_rationale"]
@@ -80,16 +86,18 @@ class TestQueryPlannerAgent:
 class TestResearcherNode:
     """测试 researcher_node 的编排流程（mock 所有外部工具）"""
 
-    def _make_state(self, **overrides):
-        s = {
+    @staticmethod
+    def _make_state(**overrides: Any) -> dict[str, Any]:
+        s: dict[str, Any] = {
             "task_id": "test-001", "query_variants": ["test"],
             "domain_category": "cs", "max_papers": 5,
         }
         s.update(overrides)
         return s
 
-    def _paper(self, arxiv_id, **overrides):
-        p = {
+    @staticmethod
+    def _paper(arxiv_id: str, **overrides: Any) -> dict[str, Any]:
+        p: dict[str, Any] = {
             "arxiv_id": arxiv_id, "title": f"Paper {arxiv_id}",
             "authors": ["A"], "year": 2023, "abstract": "...",
             "pdf_url": "http://x", "category": "cs.CL",
@@ -103,7 +111,11 @@ class TestResearcherNode:
     @patch("app.agents.researcher_node.download_paper", new_callable=AsyncMock)
     @patch("app.agents.researcher_node.search_s2", new_callable=AsyncMock)
     @patch("app.agents.researcher_node.search_arxiv", new_callable=AsyncMock)
-    def test_normal_flow(self, m_arxiv, m_s2, m_dl, m_proc, m_store):
+    def test_normal_flow(
+        self,
+        m_arxiv: AsyncMock, m_s2: AsyncMock, m_dl: AsyncMock,
+        m_proc: MagicMock, m_store: AsyncMock,
+    ) -> None:
         from app.agents.researcher_node import researcher_node
 
         m_arxiv.return_value = [self._paper("2301.001")]
@@ -114,7 +126,9 @@ class TestResearcherNode:
               "chunk_index": 0, "total_chunks_in_section": 1}], "normal")
         m_store.return_value = 1
 
-        result = asyncio.run(researcher_node(self._make_state(task_id="test-res-001")))
+        result: dict[str, Any] = asyncio.run(
+            researcher_node(self._make_state(task_id="test-res-001"))
+        )
 
         assert result["collection_name"] == "research_test-res"
         assert len(result["papers_metadata"]) == 1
@@ -127,13 +141,17 @@ class TestResearcherNode:
     @patch("app.agents.researcher_node.download_paper", new_callable=AsyncMock)
     @patch("app.agents.researcher_node.search_s2", new_callable=AsyncMock)
     @patch("app.agents.researcher_node.search_arxiv", new_callable=AsyncMock)
-    def test_all_search_failure(self, m_arxiv, m_s2, m_dl, m_proc, m_store):
+    def test_all_search_failure(
+        self,
+        m_arxiv: AsyncMock, m_s2: AsyncMock, m_dl: AsyncMock,
+        m_proc: MagicMock, m_store: AsyncMock,
+    ) -> None:
         from app.agents.researcher_node import researcher_node
 
         m_arxiv.return_value = []
         m_s2.return_value = []
 
-        result = asyncio.run(researcher_node(
+        result: dict[str, Any] = asyncio.run(researcher_node(
             self._make_state(task_id="test-empty", query_variants=["no results"])
         ))
 
@@ -146,13 +164,17 @@ class TestResearcherNode:
     @patch("app.agents.researcher_node.download_paper", new_callable=AsyncMock)
     @patch("app.agents.researcher_node.search_s2", new_callable=AsyncMock)
     @patch("app.agents.researcher_node.search_arxiv", new_callable=AsyncMock)
-    def test_partial_download_failure(self, m_arxiv, m_s2, m_dl, m_proc, m_store):
+    def test_partial_download_failure(
+        self,
+        m_arxiv: AsyncMock, m_s2: AsyncMock, m_dl: AsyncMock,
+        m_proc: MagicMock, m_store: AsyncMock,
+    ) -> None:
         from app.agents.researcher_node import researcher_node
 
         m_arxiv.return_value = [self._paper("2301.001"), self._paper("2301.002")]
         m_s2.return_value = []
 
-        async def dl_side(arxiv_id, task_dir):
+        async def dl_side(arxiv_id: str, task_dir: str) -> str:
             if arxiv_id == "2301.002":
                 raise Exception("download failed")
             return f"/tmp/{arxiv_id}.pdf"
@@ -163,7 +185,7 @@ class TestResearcherNode:
               "chunk_index": 0, "total_chunks_in_section": 1}], "normal")
         m_store.return_value = 1
 
-        result = asyncio.run(researcher_node(
+        result: dict[str, Any] = asyncio.run(researcher_node(
             self._make_state(task_id="test-partial")
         ))
 
