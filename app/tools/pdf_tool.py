@@ -45,6 +45,8 @@ SECTION_PATTERNS = {
         r"^introduction$",
         r"^1\.?\s+introduction",
         r"^i\.\s+introduction",
+        r"^1\.?\s+background",
+        r"^motivation",
     ],
     Section.RELATED_WORK.value: [
         r"^related\s+work",
@@ -59,6 +61,9 @@ SECTION_PATTERNS = {
         r"^\d+\.?\s+(method|approach|model|our\s+approach|proposed)",
         r"^methodology",
         r"^technical\s+approach",
+        r"^overall\s+architecture",
+        r"^system\s+overview",
+        r"^network\s+(architecture|design|structure)",
     ],
     Section.EXPERIMENT.value: [
         r"^experiment",
@@ -67,6 +72,9 @@ SECTION_PATTERNS = {
         r"^result",
         r"^\d+\.?\s+(experiment|evaluation|result|empirical)",
         r"^performance\s+analysis",
+        r"^experimental\s+(setup|results|evaluation)",
+        r"^evaluation\s+metrics",
+        r"^training\s+details",
     ],
     Section.CONCLUSION.value: [
         r"^conclusion",
@@ -74,6 +82,8 @@ SECTION_PATTERNS = {
         r"^discussion",
         r"^concluding\s+remarks",
         r"^\d+\.?\s+(conclusion|summary|discussion)",
+        r"^future\s+(work|directions)",
+        r"^limitation",
     ],
 }
 
