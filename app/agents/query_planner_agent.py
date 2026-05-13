@@ -3,6 +3,8 @@ Query Planner Agent（LLM Agent 1 / 3）
 将用户口语化中文主题 → 多变体英文 Arxiv query
 P0-1: 使用 with_structured_output 替代 json.loads()
 """
+from typing import cast
+
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.core.logger import get_logger
@@ -27,10 +29,10 @@ async def query_planner_node(state: ResearchState) -> dict:
     structured_llm = llm.with_structured_output(QueryPlanOutput)
 
     try:
-        result: QueryPlanOutput = await structured_llm.ainvoke([
+        result = cast(QueryPlanOutput, await structured_llm.ainvoke([
             SystemMessage(content=QUERY_PLANNER_PROMPT),
             HumanMessage(content=f"请为以下研究主题制定搜索策略：{topic}"),
-        ])
+        ]))
 
         logger.info(
             f"[{task_id}] Query Planner 完成，生成 {len(result.query_variants)} 个query，"
