@@ -75,3 +75,98 @@ class TestQueryPlannerAgent:
 
         assert result["query_variants"] == ["transformer"]
         assert "降级原因" in result["search_rationale"]
+
+
+class TestResearcherNode:
+    """测试 researcher_node 的编排流程（mock 所有外部工具）"""
+
+    def _make_state(self, **overrides):
+        s = {
+            "task_id": "test-001", "query_variants": ["test"],
+            "domain_category": "cs", "max_papers": 5,
+        }
+        s.update(overrides)
+        return s
+
+    def _paper(self, arxiv_id, **overrides):
+        p = {
+            "arxiv_id": arxiv_id, "title": f"Paper {arxiv_id}",
+            "authors": ["A"], "year": 2023, "abstract": "...",
+            "pdf_url": "http://x", "category": "cs.CL",
+        }
+        p.update(overrides)
+        return p
+
+    # --- 正常流程 ---
+    @patch("app.agents.researcher_node.store_chunks_to_chroma", new_callable=AsyncMock)
+    @patch("app.agents.researcher_node.process_paper")
+    @patch("app.agents.researcher_node.download_paper", new_callable=AsyncMock)
+    @patch("app.agents.researcher_node.search_s2", new_callable=AsyncMock)
+    @patch("app.agents.researcher_node.search_arxiv", new_callable=AsyncMock)
+    def test_normal_flow(self, m_arxiv, m_s2, m_dl, m_proc, m_store):
+        from app.agents.researcher_node import researcher_node
+
+        m_arxiv.return_value = [self._paper("2301.001")]
+        m_s2.return_value = [self._paper("2301.001", citation_count=100, s2_id="s2-1")]
+        m_dl.return_value = "/tmp/2301.001.pdf"
+        m_proc.return_value = (
+            [{"text": "chunk", "section": "abstract",
+              "chunk_index": 0, "total_chunks_in_section": 1}], "normal")
+        m_store.return_value = 1
+
+        result = asyncio.run(researcher_node(self._make_state(task_id="test-res-001")))
+
+        assert result["collection_name"] == "research_test-res"
+        assert len(result["papers_metadata"]) == 1
+        assert result["papers_metadata"][0]["parse_quality"] == "normal"
+        assert result["current_step"] == "research_done"
+
+    # --- 全部搜索失败 ---
+    @patch("app.agents.researcher_node.store_chunks_to_chroma", new_callable=AsyncMock)
+    @patch("app.agents.researcher_node.process_paper")
+    @patch("app.agents.researcher_node.download_paper", new_callable=AsyncMock)
+    @patch("app.agents.researcher_node.search_s2", new_callable=AsyncMock)
+    @patch("app.agents.researcher_node.search_arxiv", new_callable=AsyncMock)
+    def test_all_search_failure(self, m_arxiv, m_s2, m_dl, m_proc, m_store):
+        from app.agents.researcher_node import researcher_node
+
+        m_arxiv.return_value = []
+        m_s2.return_value = []
+
+        result = asyncio.run(researcher_node(
+            self._make_state(task_id="test-empty", query_variants=["no results"])
+        ))
+
+        assert result.get("error") is not None
+        assert "未能检索到论文" in result["error"]
+
+    # --- 部分下载失败 ---
+    @patch("app.agents.researcher_node.store_chunks_to_chroma", new_callable=AsyncMock)
+    @patch("app.agents.researcher_node.process_paper")
+    @patch("app.agents.researcher_node.download_paper", new_callable=AsyncMock)
+    @patch("app.agents.researcher_node.search_s2", new_callable=AsyncMock)
+    @patch("app.agents.researcher_node.search_arxiv", new_callable=AsyncMock)
+    def test_partial_download_failure(self, m_arxiv, m_s2, m_dl, m_proc, m_store):
+        from app.agents.researcher_node import researcher_node
+
+        m_arxiv.return_value = [self._paper("2301.001"), self._paper("2301.002")]
+        m_s2.return_value = []
+
+        async def dl_side(arxiv_id, task_dir):
+            if arxiv_id == "2301.002":
+                raise Exception("download failed")
+            return f"/tmp/{arxiv_id}.pdf"
+
+        m_dl.side_effect = dl_side
+        m_proc.return_value = (
+            [{"text": "chunk", "section": "abstract",
+              "chunk_index": 0, "total_chunks_in_section": 1}], "normal")
+        m_store.return_value = 1
+
+        result = asyncio.run(researcher_node(
+            self._make_state(task_id="test-partial")
+        ))
+
+        assert len(result["papers_metadata"]) == 1
+        assert result["papers_metadata"][0]["arxiv_id"] == "2301.001"
+        assert result["current_step"] == "research_done"
