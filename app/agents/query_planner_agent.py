@@ -32,15 +32,6 @@ async def query_planner_node(state: ResearchState) -> dict:
             HumanMessage(content=f"请为以下研究主题制定搜索策略：{topic}"),
         ])
 
-        # 从 LangChain 响应中提取 token 用量
-        token_count = 0
-        try:
-            if hasattr(result, "usage_metadata"):
-                meta = result.usage_metadata
-                token_count = meta.get("input_tokens", 0) + meta.get("output_tokens", 0)
-        except Exception:
-            pass
-
         logger.info(
             f"[{task_id}] Query Planner 完成，生成 {len(result.query_variants)} 个query，"
             f"领域：{result.domain_category}"
@@ -54,7 +45,6 @@ async def query_planner_node(state: ResearchState) -> dict:
             research_scope="",
             search_rationale=f"降级原因：{str(e)[:100]}",
         )
-        token_count = 0
 
     return {
         "query_variants": result.query_variants,
@@ -62,5 +52,4 @@ async def query_planner_node(state: ResearchState) -> dict:
         "research_scope": result.research_scope,
         "search_rationale": result.search_rationale,
         "current_step": "plan_done",
-        "token_usage": {**state.get("token_usage", {}), "query_planner": token_count},
     }
