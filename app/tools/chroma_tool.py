@@ -7,7 +7,7 @@ from typing import Optional
 
 from app.core.exceptions import ChromaError
 from app.core.logger import get_logger
-from app.services.llm_factory import get_embedding
+from app.services.llm_factory import embed_texts, embed_query  # noqa: F811
 from app.services.vector_store import ChromaManager
 
 logger = get_logger(__name__)
@@ -82,12 +82,11 @@ async def store_chunks_to_chroma(
         return 0
 
     try:
-        embedding_fn = get_embedding()
         chroma = ChromaManager.get_instance()
         collection = chroma.get_or_create_collection(name=collection_name)
 
         texts = [c["text"] for c in chunks]
-        embeddings = await embedding_fn.aembed_documents(texts)
+        embeddings = await embed_texts(texts)
 
         ids = [f"{paper['arxiv_id']}_chunk_{i:04d}" for i in range(len(chunks))]
         authors_str = ", ".join(paper.get("authors", []))
@@ -131,8 +130,7 @@ async def search_chunks_similarity(
     返回：[{id, text, metadata, score}, ...]
     """
     try:
-        embedding_fn = get_embedding()
-        query_emb = await embedding_fn.aembed_query(query)
+        query_emb = await embed_query(query)
 
         chroma = ChromaManager.get_instance()
         collection = chroma.get_or_create_collection(name=collection_name)
@@ -192,8 +190,7 @@ async def search_chunks_mmr(
     返回：[{id, text, metadata, score}, ...]
     """
     try:
-        embedding_fn = get_embedding()
-        query_emb = await embedding_fn.aembed_query(query)
+        query_emb = await embed_query(query)
 
         chroma = ChromaManager.get_instance()
         collection = chroma.get_or_create_collection(name=collection_name)

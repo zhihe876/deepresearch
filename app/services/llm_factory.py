@@ -2,14 +2,17 @@
 LLM 与 Embedding 工厂模块
 使用模块级单例缓存，避免重复初始化
 """
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from typing import Any
+
+from langchain_openai import ChatOpenAI
+from openai import AsyncOpenAI
 
 from app.core.config import settings
 
 
 # ============ 模块级单例缓存 ============
 _llm_instances: dict[str, ChatOpenAI] = {}
-_embedding_instance: OpenAIEmbeddings | None = None
+_embedding_client: AsyncOpenAI | None = None
 
 
 def get_llm(temperature: float = 0) -> ChatOpenAI:
@@ -31,16 +34,43 @@ def get_llm(temperature: float = 0) -> ChatOpenAI:
     return _llm_instances[cache_key]
 
 
-def get_embedding() -> OpenAIEmbeddings:
+def get_embedding_client() -> AsyncOpenAI:
     """
-    获取 Embedding 实例（OpenAIEmbeddings，兼容 SiliconFlow BGE-M3）
-    模块级单例，全局复用
+    获取原始 AsyncOpenAI 客户端（绕过 LangChain tokenizer，避免 DashScope 兼容性问题）
+    LangChain 的 OpenAIEmbeddings 会将文本 tokenize 后发送 list[list[int]]，
+    但 DashScope text-embedding-v4 只接受 str | list[str] 格式的 input。
+    模块级单例，全局复用。
     """
-    global _embedding_instance
-    if _embedding_instance is None:
-        _embedding_instance = OpenAIEmbeddings(
+    global _embedding_client
+    if _embedding_client is None:
+        _embedding_client = AsyncOpenAI(
             api_key=settings.EMBEDDING_API_KEY,
             base_url=settings.EMBEDDING_BASE_URL,
-            model=settings.EMBEDDING_MODEL_NAME,
+            timeout=30.0,
+            max_retries=2,
         )
-    return _embedding_instance
+    return _embedding_client
+
+
+async def embed_texts(texts: list[str]) -> list[list[float]]:
+    """
+    将文本列表转为向量（直接调 OpenAI 兼容 API，不走 LangChain tokenizer）
+    参数：texts — 文本列表
+    返回：向量列表 [[float, ...], ...]
+    """
+    client = get_embedding_client()
+    response = await client.embeddings.create(
+        model=settings.EMBEDDING_MODEL_NAME,
+        input=texts,
+    )
+    return [d.embedding for d in response.data]
+
+
+async def embed_query(query: str) -> list[float]:
+    """将单条查询文本转为向量"""
+    client = get_embedding_client()
+    response = await client.embeddings.create(
+        model=settings.EMBEDDING_MODEL_NAME,
+        input=query,
+    )
+    return response.data[0].embedding
