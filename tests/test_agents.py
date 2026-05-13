@@ -192,3 +192,117 @@ class TestResearcherNode:
         assert len(result["papers_metadata"]) == 1
         assert result["papers_metadata"][0]["arxiv_id"] == "2301.001"
         assert result["current_step"] == "research_done"
+
+
+class TestVerifyCitations:
+    """P0-2: verify_citations — 程序化引用核验"""
+
+    def _papers(self) -> list[dict[str, Any]]:
+        return [
+            {"title": "Attention Is All You Need",
+             "authors": ["Vaswani, Ashish", "Shazeer, Noam"],
+             "arxiv_id": "1706.03762", "year": 2017},
+            {"title": "BERT: Pre-training of Deep Bidirectional Transformers",
+             "authors": ["Devlin, Jacob", "Chang, Ming-Wei"],
+             "arxiv_id": "1810.04805", "year": 2019},
+        ]
+
+    def test_all_valid_citations(self):
+        from app.agents.writer_agent import verify_citations
+
+        draft = "Transformer [Vaswani, 2017] 提出自注意力机制。BERT [Devlin, 2019] 引入掩码语言模型。"
+        suspicious = verify_citations(draft, self._papers())
+        assert suspicious == []
+
+    def test_suspicious_citation(self):
+        from app.agents.writer_agent import verify_citations
+
+        draft = "GPT-3 [Brown, 2020] 展示了少样本学习能力。Transformer [Vaswani, 2017] 是基础。"
+        suspicious = verify_citations(draft, self._papers())
+        assert len(suspicious) == 1
+        assert "Brown" in suspicious[0] and "2020" in suspicious[0]
+
+    def test_no_citations_in_draft(self):
+        from app.agents.writer_agent import verify_citations
+
+        draft = "深度学习方法在 NLP 任务中表现优异。"
+        suspicious = verify_citations(draft, self._papers())
+        assert suspicious == []
+
+    def test_multiple_authors_takes_first(self):
+        from app.agents.writer_agent import verify_citations
+
+        # Vaswani 是第一作者，Shazeer 不是
+        draft = "相关工作 [Shazeer, 2017] 使用了不同的方法。"
+        suspicious = verify_citations(draft, self._papers())
+        # Shazeer 不是第一作者，匹配不到
+        assert "[Shazeer, 2017]" in suspicious
+
+
+class TestWriterNode:
+    """writer_node — 首次起草 vs 定向修改"""
+
+    def test_first_draft_mode(self):
+        """revision_count==0 → 完整起草消息"""
+        from app.agents.writer_agent import writer_node
+        from unittest.mock import patch, AsyncMock, MagicMock
+
+        state: dict[str, Any] = {
+            "task_id": "test-w1", "topic": "Transformer attention",
+            "collection_name": "research_test",
+            "papers_metadata": [
+                {"title": "Paper A", "authors": ["A"], "year": 2023},
+                {"title": "Paper B", "authors": ["B"], "year": 2024},
+            ],
+            "research_scope": "2023-2024",
+            "revision_count": 0,
+            "rag_query_log": [], "draft": "", "citation_warning": [],
+        }
+
+        mock_agent_executor = AsyncMock()
+        mock_agent_executor.ainvoke.return_value = {
+            "output": "# 综述草稿\n\n## 摘要\n测试内容。\n\n[C, 2025]"
+        }
+
+        with patch("app.agents.writer_agent.create_tool_calling_agent") as mock_create_agent, \
+             patch("app.agents.writer_agent.AgentExecutor", return_value=mock_agent_executor), \
+             patch("app.agents.writer_agent.verify_citations", return_value=["[C, 2025]"]):
+            mock_create_agent.return_value = MagicMock()
+
+            result = asyncio.run(writer_node(state))
+
+        assert result["draft"] != ""
+        assert result["current_step"] == "write_done"
+        assert "[C, 2025]" in result["citation_warning"]
+        assert len(result["rag_query_log"]) > 0 or len(result["rag_query_log"]) == 0
+
+    def test_revision_mode(self):
+        """revision_count>0 → 定向修改消息（只传问题章节）"""
+        from app.agents.writer_agent import writer_node
+        from unittest.mock import patch, AsyncMock, MagicMock
+
+        state: dict[str, Any] = {
+            "task_id": "test-w2", "topic": "Transformer attention",
+            "collection_name": "research_test",
+            "papers_metadata": [{"title": "P", "authors": ["A"], "year": 2023}],
+            "research_scope": "",
+            "revision_count": 1,  # 修改模式
+            "draft": "## 摘要\n旧摘要内容。\n\n## 方法\n旧方法内容。\n\n## 实验\n旧实验内容。",
+            "sections_to_revise": {"第3节 方法分类": "旧方法内容。"},
+            "feedback": '{"overall_score":55,"specific_issues":[{"issue":"x","location":"第3节 方法分类","severity":"major","suggestion":"补充对比"}]}',
+            "rag_query_log": [], "citation_warning": [],
+        }
+
+        mock_agent_executor = AsyncMock()
+        mock_agent_executor.ainvoke.return_value = {"output": "修改后的方法内容。"}
+
+        with patch("app.agents.writer_agent.create_tool_calling_agent") as mock_create_agent, \
+             patch("app.agents.writer_agent.AgentExecutor", return_value=mock_agent_executor), \
+             patch("app.agents.writer_agent.verify_citations", return_value=[]):
+            mock_create_agent.return_value = MagicMock()
+
+            result = asyncio.run(writer_node(state))
+
+        assert result["current_step"] == "write_done"
+        # 修改后 draft 应该包含修改标记
+        assert result["draft"] != ""
