@@ -8,7 +8,6 @@ from typing import Any
 
 from app.core.config import settings
 from app.core.logger import get_logger
-from app.graph.state import ResearchState
 from app.services.vector_store import ChromaManager
 from app.tools.arxiv_tool import download_paper, search_arxiv
 from app.tools.chroma_tool import store_chunks_to_chroma
@@ -45,7 +44,7 @@ def _deduplicate_and_rank(papers: list[dict[str, Any]], max_papers: int) -> list
     return ranked[:max_papers]
 
 
-async def researcher_node(state: ResearchState) -> dict[str, Any]:
+async def researcher_node(state: dict[str, Any]) -> dict[str, Any]:
     """
     执行论文检索、下载、解析、过滤、入库全流程
     不调用任何 LLM — 纯工具编排流水线
