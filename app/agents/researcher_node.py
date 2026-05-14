@@ -58,13 +58,20 @@ async def researcher_node(state: dict[str, Any]) -> dict[str, Any]:
         search_arxiv(q, state["domain_category"], state["max_papers"])
         for q in state["query_variants"]
     ]
+
+    # Arxiv API 有严格频率限制，顺序执行（间隔 2s），S2 并行
     s2_tasks = [
         search_s2(q, state["max_papers"])
         for q in state["query_variants"][:2]
     ]
 
-    raw_results: list[list[dict[str, Any]] | Exception] = await asyncio.gather(
-        *arxiv_tasks, *s2_tasks, return_exceptions=True
+    arxiv_results: list[list[dict[str, Any]] | Exception] = []
+    for t in arxiv_tasks:
+        arxiv_results.append(await t)
+        await asyncio.sleep(2)  # 避免触发 429
+
+    raw_results = arxiv_results + list(
+        await asyncio.gather(*s2_tasks, return_exceptions=True)
     )
 
     all_results: list[dict[str, Any]] = []
