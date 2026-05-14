@@ -19,10 +19,17 @@ from app.tools.rag_tool import knowledge_base_tool
 logger = get_logger(__name__)
 
 
+def _extract_last_name(author_name: str) -> str:
+    """从作者名中提取姓氏，兼容 'LastName, FirstName' 和 'FirstName LastName' 两种格式"""
+    if "," in author_name:
+        return author_name.split(",")[0].strip().lower()
+    return author_name.split()[-1].lower()
+
+
 def verify_citations(draft: str, papers_metadata: list[dict[str, Any]]) -> list[str]:
     """
     P0-2: 程序化引用核验
-    从草稿中用正则提取所有 [Author, Year] 引用，与 papers_metadata 精确匹配
+    正则提取 [Author, Year] → 与 papers_metadata 的论文第一作者姓氏+年份精确匹配
     返回无法匹配的可疑引用列表
     """
     citations = re.findall(r"\[([A-Za-z][A-Za-z\s\-]+?),\s*(\d{4})\]", draft)
@@ -32,22 +39,15 @@ def verify_citations(draft: str, papers_metadata: list[dict[str, Any]]) -> list[
         year = str(paper.get("year", ""))
         authors: list[str] = paper.get("authors", [])
         if authors:
-            first_author = authors[0]
-            # 处理 "LastName, FirstName" 和 "FirstName LastName" 两种格式
-            if "," in first_author:
-                last_name = first_author.split(",")[0].strip().lower()
-            else:
-                last_name = first_author.split()[-1].lower()
-            valid_set.add(f"{last_name}_{year}")
+            valid_set.add(f"{_extract_last_name(authors[0])}_{year}")
 
     suspicious: list[str] = []
     for author, year in citations:
-        last_name = author.strip().split()[-1].lower()
-        key = f"{last_name}_{year}"
+        key = f"{_extract_last_name(author)}_{year}"
         if key not in valid_set:
             suspicious.append(f"[{author.strip()}, {year}]")
 
-    return list(dict.fromkeys(suspicious))  # 去重保序
+    return list(dict.fromkeys(suspicious))
 
 
 def _build_user_message(state: dict[str, Any]) -> str:
@@ -134,24 +134,22 @@ async def writer_node(state: dict[str, Any]) -> dict[str, Any]:
 
     # 提取 RAG 检索日志
     rag_log: list[dict[str, str]] = list(state.get("rag_query_log", []))
-    for step in raw_result.get("intermediate_steps", []):
-        if len(step) >= 2 and hasattr(step[0], "tool") and step[0].tool == "query_papers":
+    for action, _ in raw_result.get("intermediate_steps", []):
+        if getattr(action, "tool", "") == "query_papers":
             rag_log.append({
-                "query": step[0].tool_input.get("query", ""),
-                "collection": step[0].tool_input.get("collection_name", ""),
+                "query": action.tool_input.get("query", ""),
+                "collection": action.tool_input.get("collection_name", ""),
             })
 
-    # 定向修改：合并修改后的章节回原文
+    # 定向修改：将修改后的内容合并回原文
+    draft = output
     if revision_count > 0:
+        original_draft: str = state.get("draft", "")
         sections_to_revise = state.get("sections_to_revise", {})
-        draft = state.get("draft", "")
-        for section_name in sections_to_revise:
-            # 用修改后的内容替换原文中对应章节
-            draft = draft.replace(
-                sections_to_revise[section_name], output
-            ) if sections_to_revise[section_name] in draft else draft + "\n\n" + output
-    else:
-        draft = output
+        for section_name, old_content in sections_to_revise.items():
+            if old_content in original_draft:
+                original_draft = original_draft.replace(old_content, output)
+        draft = original_draft
 
     logger.info(
         f"[{task_id}] Writer 第 {revision_count} 轮完成，"
