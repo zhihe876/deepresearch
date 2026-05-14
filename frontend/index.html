@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeepResearch — 学术综述合成引擎</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: system-ui, -apple-system, sans-serif; background:#f5f7fa; color:#333; height:100vh; display:flex; }
+/* 左栏 */
+#sidebar { width:260px; background:#fff; border-right:1px solid #e0e4e8; display:flex; flex-direction:column; overflow:hidden; }
+#sidebar h2 { padding:16px; font-size:15px; border-bottom:1px solid #e0e4e8; }
+#create-btn { margin:12px; padding:8px 16px; background:#3a82f7; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:13px; }
+#create-btn:hover { background:#2563eb; }
+#create-form { display:none; padding:0 12px 12px; }
+#create-form.show { display:block; }
+#create-form textarea { width:100%; height:60px; padding:8px; border:1px solid #d0d5dd; border-radius:4px; font-size:13px; resize:vertical; }
+#create-form input { width:60px; padding:6px; border:1px solid #d0d5dd; border-radius:4px; font-size:13px; margin:6px 0; }
+#create-form select { padding:6px; border:1px solid #d0d5dd; border-radius:4px; font-size:13px; margin:6px 0 6px 8px; }
+#create-form button { padding:6px 16px; background:#3a82f7; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:13px; margin-top:6px; }
+#task-list { flex:1; overflow-y:auto; }
+.task-item { padding:10px 12px; border-bottom:1px solid #f0f2f5; cursor:pointer; font-size:13px; }
+.task-item:hover { background:#f7f9fc; }
+.task-item .topic { font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.task-item .meta { font-size:11px; color:#888; margin-top:2px; }
+.badge { display:inline-block; padding:1px 8px; border-radius:10px; font-size:11px; color:#fff; }
+.badge-pending { background:#9ca3af; }
+.badge-running { background:#3a82f7; animation:pulse 1.5s infinite; }
+.badge-completed { background:#22c55e; }
+.badge-failed { background:#ef4444; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+/* 中栏 */
+#center { width:380px; background:#fff; border-right:1px solid #e0e4e8; display:flex; flex-direction:column; overflow:hidden; }
+#center h3 { padding:16px; font-size:14px; border-bottom:1px solid #e0e4e8; }
+#steps { display:flex; padding:12px 16px; gap:4px; font-size:12px; color:#9ca3af; }
+#steps .step { flex:1; text-align:center; }
+#steps .step.active { color:#3a82f7; font-weight:600; }
+#steps .step.done { color:#22c55e; }
+#log { flex:1; overflow-y:auto; padding:12px 16px; font-size:12px; font-family:monospace; }
+#log .line { padding:3px 0; border-bottom:1px solid #f5f5f5; }
+#score-evo { padding:8px 16px; font-size:12px; color:#666; border-top:1px solid #e0e4e8; display:none; }
+#score-evo.show { display:block; }
+/* 右栏 */
+#main { flex:1; display:flex; flex-direction:column; overflow:hidden; background:#fff; }
+#main-header { padding:12px 20px; border-bottom:1px solid #e0e4e8; display:flex; justify-content:space-between; align-items:center; }
+#main-header h3 { font-size:15px; }
+#export-btn { padding:6px 14px; background:#22c55e; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:12px; display:none; }
+#export-btn.show { display:block; }
+#report { flex:1; overflow-y:auto; padding:20px 28px; }
+#report .placeholder { color:#9ca3af; font-size:14px; text-align:center; margin-top:40px; }
+</style>
+</head>
+<body>
+
+<!-- 左栏：任务列表 -->
+<div id="sidebar">
+  <h2>DeepResearch</h2>
+  <button id="create-btn" onclick="toggleForm()">+ 新建研究</button>
+  <div id="create-form">
+    <textarea id="topic-input" placeholder="输入研究主题（支持中文）"></textarea>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+      <span style="font-size:12px;">论文数:</span>
+      <input id="papers-input" type="number" min="1" max="20" value="5">
+      <span style="font-size:12px;">语言:</span>
+      <select id="lang-input"><option value="zh">中文</option><option value="en">English</option></select>
+    </div>
+    <button onclick="createTask()">提交</button>
+  </div>
+  <div id="task-list"></div>
+</div>
+
+<!-- 中栏：执行过程 -->
+<div id="center">
+  <h3>执行过程</h3>
+  <div id="steps">
+    <div class="step" id="step-plan">查询规划</div>
+    <div class="step" id="step-search">文献检索</div>
+    <div class="step" id="step-write">写作审查</div>
+    <div class="step" id="step-done">完成</div>
+  </div>
+  <div id="log"><div class="placeholder">选择任务查看执行日志</div></div>
+  <div id="score-evo">评分演进：</div>
+</div>
+
+<!-- 右栏：报告 -->
+<div id="main">
+  <div id="main-header">
+    <h3 id="report-title">报告</h3>
+    <button id="export-btn" onclick="exportReport()">导出 .md</button>
+  </div>
+  <div id="report"><div class="placeholder">选择已完成任务查看报告</div></div>
+</div>
+
+<script>
+const API = '/api/tasks';
+let activeTaskId = null;
+let pollTimer = null;
+
+function toggleForm() {
+  document.getElementById('create-form').classList.toggle('show');
+}
+
+async function createTask() {
+  const topic = document.getElementById('topic-input').value.trim();
+  if (!topic) return alert('请输入研究主题');
+  const max_papers = parseInt(document.getElementById('papers-input').value) || 5;
+  const language = document.getElementById('lang-input').value;
+
+  const res = await fetch(API, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({topic, max_papers, language}),
+  });
+  if (!res.ok) return alert('创建失败');
+  const data = await res.json();
+  document.getElementById('topic-input').value = '';
+  document.getElementById('create-form').classList.remove('show');
+  loadTaskList();
+  selectTask(data.task_id);
+}
+
+async function loadTaskList() {
+  const res = await fetch(`${API}?limit=50`);
+  const tasks = await res.json();
+  const list = document.getElementById('task-list');
+  list.innerHTML = tasks.map(t => `
+    <div class="task-item" onclick="selectTask('${t.task_id}')">
+      <div class="topic">${t.topic.substring(0, 30)}${t.topic.length>30?'…':''}</div>
+      <div class="meta">
+        <span class="badge badge-${t.status}">${t.status}</span>
+        ${new Date(t.created_at).toLocaleString('zh-CN')}
+      </div>
+    </div>
+  `).join('') || '<div style="padding:12px;color:#9ca3af;font-size:13px;">暂无任务</div>';
+}
+
+async function selectTask(taskId) {
+  activeTaskId = taskId;
+  if (pollTimer) clearInterval(pollTimer);
+
+  const res = await fetch(`${API}/${taskId}`);
+  const task = await res.json();
+  renderTaskDetail(task);
+
+  if (task.status === 'running' || task.status === 'pending') {
+    pollTimer = setInterval(() => refreshTask(taskId), 2000);
+  }
+}
+
+async function refreshTask(taskId) {
+  const res = await fetch(`${API}/${taskId}`);
+  const task = await res.json();
+  renderTaskDetail(task);
+  if (task.status === 'completed' || task.status === 'failed') {
+    clearInterval(pollTimer);
+    loadTaskList();
+  }
+}
+
+function renderTaskDetail(task) {
+  // 步骤条
+  const steps = ['plan','search','write','done'];
+  let passed = false;
+  steps.forEach(s => {
+    const el = document.getElementById('step-' + s);
+    el.classList.remove('active', 'done');
+  });
+  if (task.status === 'completed' || task.final_report) {
+    steps.forEach(s => document.getElementById('step-'+s).classList.add('done'));
+  } else if (task.overall_score != null) {
+    ['plan','search','write'].forEach(s => document.getElementById('step-'+s).classList.add('done'));
+    document.getElementById('step-done').classList.add('active');
+  } else if (task.papers_count > 0) {
+    ['plan','search'].forEach(s => document.getElementById('step-'+s).classList.add('done'));
+    document.getElementById('step-write').classList.add('active');
+  } else {
+    document.getElementById('step-plan').classList.add('active');
+  }
+
+  // 日志
+  const log = document.getElementById('log');
+  const lines = [];
+  const now = new Date().toLocaleTimeString('zh-CN');
+  if (task.papers_count > 0) {
+    lines.push(`[${now}] 📥 文献检索完成：${task.papers_count} 篇论文`);
+  }
+  if (task.overall_score != null) {
+    lines.push(`[${now}] 📋 审稿完成：${task.overall_score} 分`);
+  }
+  if (task.revision_count > 0) {
+    lines.push(`[${now}] ✍️ 修改轮次：${task.revision_count} 轮`);
+  }
+  if (task.final_report) {
+    lines.push(`[${now}] ✅ 报告生成完毕`);
+  }
+  if (task.status === 'running' && lines.length === 0) {
+    lines.push(`[${now}] 🔄 执行中...`);
+  }
+  if (task.status === 'failed') {
+    lines.push(`[${now}] ❌ 失败：${task.error_message || '未知错误'}`);
+  }
+  log.innerHTML = lines.map(l => `<div class="line">${l}</div>`).join('') || '<div class="placeholder">等待执行...</div>';
+  log.scrollTop = log.scrollHeight;
+
+  // 评分演进
+  document.getElementById('score-evo').classList.remove('show');
+
+  // 报告
+  if (task.final_report) {
+    document.getElementById('report').innerHTML = marked.parse(task.final_report);
+    document.getElementById('export-btn').classList.add('show');
+  } else {
+    document.getElementById('report').innerHTML = '<div class="placeholder">等待报告生成...</div>';
+    document.getElementById('export-btn').classList.remove('show');
+  }
+}
+
+function exportReport() {
+  if (!activeTaskId) return;
+  window.open(`${API}/${activeTaskId}/export`, '_blank');
+}
+
+// 初始加载
+loadTaskList();
+setInterval(loadTaskList, 30000);
+</script>
+</body>
+</html>

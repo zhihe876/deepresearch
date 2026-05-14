@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -51,6 +52,12 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.include_router(tasks.router)
 app.include_router(stream.router)
+
+
+@app.get("/", response_class=HTMLResponse)
+async def index() -> str:
+    with open("frontend/index.html", encoding="utf-8") as f:
+        return f.read()
 
 
 @app.get("/health")
