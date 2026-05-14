@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -24,19 +24,16 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 logger = get_logger(__name__)
 
 # DeepSeek 单价（USD/1K tokens）
-COST_INPUT_PER_1K = 0.00014
-COST_OUTPUT_PER_1K = 0.00028
+COST_PER_1K = 0.00014  # DeepSeek 输入价格（输出 $0.00028，此处简化统算）
 
 
 def _calculate_cost(token_usage: dict[str, int]) -> float:
-    """基于 token_usage 和 DeepSeek 单价估算费用"""
-    total_input = sum(v for k, v in token_usage.items() if "input" in k.lower() or not ("output" in k.lower()))
-    total_output = sum(v for k, v in token_usage.items() if "output" in k.lower())
-    return round(
-        total_input / 1000 * COST_INPUT_PER_1K
-        + total_output / 1000 * COST_OUTPUT_PER_1K,
-        6,
-    )
+    """基于 token_usage 和 DeepSeek 单价估算费用。
+    token_usage 的 key 为节点名（如 'query_planner', 'writer_r0'），不区分 input/output，
+    因此统一按输入价格计算（DeepSeek 输入 $0.00014/1K，输出 $0.00028/1K）。
+    """
+    total_tokens = sum(token_usage.values())
+    return round(total_tokens / 1000 * COST_PER_1K, 6)
 
 
 def _get_final_score(review_history: list[dict[str, Any]]) -> int | None:
