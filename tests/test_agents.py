@@ -304,5 +304,108 @@ class TestWriterNode:
             result = asyncio.run(writer_node(state))
 
         assert result["current_step"] == "write_done"
-        # 修改后 draft 应该包含修改标记
         assert result["draft"] != ""
+
+
+class TestExtractSectionsToRevise:
+    """P1-4: extract_sections_to_revise — 从草稿提取问题章节"""
+
+    def test_extracts_critical_and_major(self):
+        from app.agents.reviewer_agent import extract_sections_to_revise
+
+        draft = "## 摘要\n摘要内容。\n\n## 方法分类\n方法内容旧。\n\n## 实验对比\n实验内容旧。\n\n## 结论\n结论内容。"
+
+        issues: list[dict[str, Any]] = [
+            {"issue": "缺少引用", "location": "第2节 方法分类", "severity": "critical", "suggestion": "补充"},
+            {"issue": "格式问题", "location": "第4节 结论", "severity": "minor", "suggestion": "调整格式"},
+            {"issue": "缺少对比表格", "location": "第3节 实验对比", "severity": "major", "suggestion": "添加"},
+        ]
+
+        result = extract_sections_to_revise(draft, issues)
+        assert "第2节 方法分类" in result
+        assert "第3节 实验对比" in result
+        assert "第4节 结论" not in result  # minor 不提取
+
+    def test_empty_issues(self):
+        from app.agents.reviewer_agent import extract_sections_to_revise
+
+        result = extract_sections_to_revise("some draft", [])
+        assert result == {}
+
+    def test_location_not_found(self):
+        from app.agents.reviewer_agent import extract_sections_to_revise
+
+        draft = "## 简介\n简介内容。"
+        issues: list[dict[str, Any]] = [
+            {"issue": "x", "location": "第5节 不存在的章节", "severity": "major", "suggestion": "y"},
+        ]
+
+        result = extract_sections_to_revise(draft, issues)
+        assert result == {}
+
+
+class TestReviewerNode:
+    """reviewer_node — with_structured_output + 驳回逻辑"""
+
+    def test_pass_review(self):
+        from app.agents.reviewer_agent import reviewer_node
+        from unittest.mock import patch, AsyncMock, MagicMock
+        from app.models.llm_outputs import ReviewOutput, DimensionScores
+
+        mock_output = ReviewOutput(
+            pass_review=True, overall_score=85,
+            dimension_scores=DimensionScores(structure=85, data_support=80, logic=90, citation=85, hallucination_risk=80),
+            overall_comment="通过", specific_issues=[],
+        )
+
+        mock_structured = AsyncMock()
+        mock_structured.ainvoke.return_value = mock_output
+        mock_llm = MagicMock()
+        mock_llm.with_structured_output.return_value = mock_structured
+
+        state: dict[str, Any] = {
+            "task_id": "test-r1", "draft": "## 摘要\n内容。\n\n## 引言\n内容。",
+            "topic": "test", "citation_warning": [],
+            "revision_count": 0, "review_history": [],
+        }
+
+        with patch("app.agents.reviewer_agent.get_llm", return_value=mock_llm):
+            result = asyncio.run(reviewer_node(state))
+
+        assert result["pass_review"] is True
+        assert result["revision_count"] == 1
+        assert len(result["review_history"]) == 1
+
+    def test_reject_critical(self):
+        from app.agents.reviewer_agent import reviewer_node
+        from unittest.mock import patch, AsyncMock, MagicMock
+        from app.models.llm_outputs import ReviewOutput, IssueItem, DimensionScores
+
+        mock_output = ReviewOutput(
+            pass_review=True,  # LLM 说通过
+            overall_score=70,
+            dimension_scores=DimensionScores(structure=70, data_support=70, logic=70, citation=70, hallucination_risk=70),
+            overall_comment="评论",
+            specific_issues=[
+                IssueItem(issue="缺少核心章节", location="第2节", severity="critical", suggestion="补充"),
+            ],
+        )
+
+        mock_structured = AsyncMock()
+        mock_structured.ainvoke.return_value = mock_output
+        mock_llm = MagicMock()
+        mock_llm.with_structured_output.return_value = mock_structured
+
+        state: dict[str, Any] = {
+            "task_id": "test-r2",
+            "draft": "## 摘要\n摘要内容。\n\n## 第2节 方法分类\n方法内容。\n\n## 实验\n实验内容。",
+            "topic": "test", "citation_warning": [],
+            "revision_count": 0, "review_history": [],
+        }
+
+        with patch("app.agents.reviewer_agent.get_llm", return_value=mock_llm):
+            result = asyncio.run(reviewer_node(state))
+
+        # LLM 说通过，但代码因 critical 问题驳回
+        assert result["pass_review"] is False
+        assert result["sections_to_revise"] != {}
