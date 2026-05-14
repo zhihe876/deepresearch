@@ -54,16 +54,19 @@ def get_embedding_client() -> AsyncOpenAI:
 
 async def embed_texts(texts: list[str]) -> list[list[float]]:
     """
-    将文本列表转为向量（直接调 OpenAI 兼容 API，不走 LangChain tokenizer）
-    参数：texts — 文本列表
-    返回：向量列表 [[float, ...], ...]
+    将文本列表转为向量（直接调 OpenAI 兼容 API，每批最多 10 条）
+    DashScope text-embedding-v4 限制 batch_size ≤ 10
     """
     client = get_embedding_client()
-    response = await client.embeddings.create(
-        model=settings.EMBEDDING_MODEL_NAME,
-        input=texts,
-    )
-    return [d.embedding for d in response.data]
+    all_embeddings: list[list[float]] = []
+    for i in range(0, len(texts), 10):
+        batch = texts[i : i + 10]
+        response = await client.embeddings.create(
+            model=settings.EMBEDDING_MODEL_NAME,
+            input=batch,
+        )
+        all_embeddings.extend(d.embedding for d in response.data)
+    return all_embeddings
 
 
 async def embed_query(query: str) -> list[float]:
