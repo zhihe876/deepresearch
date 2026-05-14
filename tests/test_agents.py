@@ -409,3 +409,60 @@ class TestReviewerNode:
         # LLM 说通过，但代码因 critical 问题驳回
         assert result["pass_review"] is False
         assert result["sections_to_revise"] != {}
+
+
+class TestGraphRoutes:
+    """图路由逻辑 + report_finalizer"""
+
+    def test_route_planner_error_to_end(self):
+        from app.graph.research_graph import route_after_query_planner
+        assert route_after_query_planner({"error": "some error"}) == "end"
+
+    def test_route_planner_ok_to_researcher(self):
+        from app.graph.research_graph import route_after_query_planner
+        assert route_after_query_planner({}) == "researcher"
+
+    def test_route_researcher_empty_to_end(self):
+        from app.graph.research_graph import route_after_researcher
+        assert route_after_researcher({"papers_metadata": []}) == "end"
+
+    def test_route_researcher_ok_to_writer(self):
+        from app.graph.research_graph import route_after_researcher
+        assert route_after_researcher({"papers_metadata": [{"title": "x"}]}) == "writer"
+
+    def test_route_review_pass_to_finalizer(self):
+        from app.graph.research_graph import route_after_review
+        assert route_after_review({"pass_review": True}) == "finalizer"
+
+    def test_route_review_max_revisions(self):
+        from app.graph.research_graph import route_after_review
+        assert route_after_review({"pass_review": False, "revision_count": 3}) == "finalizer"
+
+    def test_route_review_retry(self):
+        from app.graph.research_graph import route_after_review
+        assert route_after_review({"pass_review": False, "revision_count": 1}) == "writer"
+
+    def test_report_finalizer_appends_appendix(self):
+        from app.graph.research_graph import report_finalizer_node
+        import asyncio
+
+        state: dict[str, Any] = {
+            "draft": "# 综述\n\n内容。",
+            "papers_metadata": [{"title": "P1", "parse_quality": "low", "arxiv_id": "x1"}],
+            "revision_count": 2,
+            "review_history": [
+                {"overall_score": 65}, {"overall_score": 78},
+            ],
+            "rag_query_log": [{"query": "q", "collection": "c"}],
+            "citation_warning": ["[X, 2024]"],
+        }
+
+        result = asyncio.run(report_finalizer_node(state))
+        assert "质量追踪报告" in result["final_report"]
+        assert "P1" in result["final_report"]
+        assert "[X, 2024]" in result["final_report"]
+        assert result["current_step"] == "done"
+
+    def test_graph_compiles(self):
+        from app.graph.research_graph import research_graph
+        assert research_graph is not None
