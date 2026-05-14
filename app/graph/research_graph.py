@@ -103,14 +103,22 @@ async def report_finalizer_node(state: dict[str, Any]) -> dict[str, Any]:
 
 
 # ============ 图组装 ============
+def _with_state_merge(fn):
+    """包装器：确保节点返回 dict 与已有 state 合并（StateGraph(dict) 默认为替换）"""
+    async def wrapped(state: dict[str, Any]) -> dict[str, Any]:
+        result = await fn(state)
+        return {**state, **result}
+    return wrapped
+
+
 def build_research_graph() -> StateGraph:
     graph = StateGraph(dict)
 
-    graph.add_node("query_planner", query_planner_node)
-    graph.add_node("researcher", researcher_node)
-    graph.add_node("writer", writer_node)
-    graph.add_node("reviewer", reviewer_node)
-    graph.add_node("report_finalizer", report_finalizer_node)
+    graph.add_node("query_planner", _with_state_merge(query_planner_node))
+    graph.add_node("researcher", _with_state_merge(researcher_node))
+    graph.add_node("writer", _with_state_merge(writer_node))
+    graph.add_node("reviewer", _with_state_merge(reviewer_node))
+    graph.add_node("report_finalizer", _with_state_merge(report_finalizer_node))
 
     graph.set_entry_point("query_planner")
 

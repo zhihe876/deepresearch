@@ -90,9 +90,7 @@ async def health_check():
             components["database"]["status"] = "error"
             components["database"]["error"] = str(e)
 
-    async with asyncio.TaskGroup() as tg:
-        tg.create_task(check_chroma())
-        tg.create_task(check_database())
+    await asyncio.gather(check_chroma(), check_database())
 
     overall = "ok"
     for c in components.values():
